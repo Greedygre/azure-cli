@@ -502,15 +502,15 @@ class LogAnalyticsWorkspacePreparer(NoTrafficRecordingPreparer, SingleValueRepla
 
     def create_resource(self, name, **kwargs):
         group = self._get_resource_group(**kwargs)
-        template = ('az monitor log-analytics workspace create -l {} -g {} -n {} --query "customerId" -otsv')
+        template = ('az monitor log-analytics workspace create -l {} -g {} -n {}')
         try:
-            customer_id = self.live_only_execute(self.cli_ctx, template.format(self.location, group, name)).output
+            customer_id = self.live_only_execute(self.cli_ctx, template.format(self.location, group, name)).get_output_in_json()["customerId"]
         except AttributeError:  # live only execute returns None if playing from record
             customer_id = None
 
-        get_share_key_template = ('az monitor log-analytics workspace get-shared-keys -g {} -n {} --query "primarySharedKey" -otsv')
+        get_share_key_template = ('az monitor log-analytics workspace get-shared-keys -g {} -n {}')
         try:
-            log_shared_key = self.live_only_execute(self.cli_ctx, get_share_key_template.format(group, name)).output
+            log_shared_key = self.live_only_execute(self.cli_ctx, get_share_key_template.format(group, name)).get_output_in_json()["primarySharedKey"]
         except AttributeError:  # live only execute returns None if playing from record
             log_shared_key = None
 
