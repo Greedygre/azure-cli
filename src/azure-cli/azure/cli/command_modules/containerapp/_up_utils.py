@@ -51,7 +51,8 @@ from ._utils import (
     format_location,
     is_docker_running,
     get_pack_exec_path,
-    get_latest_buildpack_run_tag
+    get_latest_buildpack_run_tag,
+    get_acr_registry_name
 
 )
 
@@ -931,7 +932,7 @@ def _get_registry_from_app(app, source):
 
 
 def _get_acr_rg(app):
-    registry_name = app.registry_server[: app.registry_server.rindex(ACR_IMAGE_SUFFIX)]
+    registry_name = get_acr_registry_name(app.registry_server)
     client = get_mgmt_service_client(
         app.cmd.cli_ctx, ContainerRegistryManagementClient
     ).registries

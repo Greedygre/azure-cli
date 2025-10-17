@@ -24,18 +24,17 @@ from urllib.request import urlopen
 from datetime import datetime
 from dateutil.relativedelta import relativedelta
 from azure.cli.core.azclierror import (ValidationError, RequiredArgumentMissingError, CLIInternalError,
-                                       ResourceNotFoundError, FileOperationError, CLIError, UnauthorizedError,
-                                       InvalidArgumentValueError)
+                                       ResourceNotFoundError, FileOperationError, CLIError, UnauthorizedError)
 from azure.cli.core.commands.client_factory import get_subscription_id
 from azure.cli.command_modules.appservice.utils import _normalize_location
 from .aaz.latest.network.vnet import Show as VNetShow
 from azure.cli.command_modules.role.custom import create_role_assignment
 from azure.cli.command_modules.acr.custom import acr_show
 from azure.cli.core.commands.client_factory import get_mgmt_service_client
-from azure.cli.core._profile import Profile
+from azure.cli.core.cloud import get_active_cloud
+
 from azure.cli.core.profiles import ResourceType
 from azure.mgmt.containerregistry import ContainerRegistryManagementClient
-from azure.mgmt.resource import ResourceManagementClient
 from azure.mgmt.servicelinker import ServiceLinkerManagementClient
 from azure.mgmt.core.tools import parse_resource_id, is_valid_resource_id, resource_id
 
@@ -44,8 +43,10 @@ from knack.log import get_logger
 from ._clients import ContainerAppClient, ManagedEnvironmentClient, WorkloadProfileClient, ContainerAppsJobClient
 from ._client_factory import handle_raw_exception, providers_client_factory, cf_resource_groups, log_analytics_client_factory, log_analytics_shared_key_client_factory
 from ._constants import (MAXIMUM_CONTAINER_APP_NAME_LENGTH, SHORT_POLLING_INTERVAL_SECS, LONG_POLLING_INTERVAL_SECS,
-                         LOG_ANALYTICS_RP, CONTAINER_APPS_RP, CHECK_CERTIFICATE_NAME_AVAILABILITY_TYPE, ACR_IMAGE_SUFFIX,
-                         LOGS_STRING, PENDING_STATUS, SUCCEEDED_STATUS, UPDATING_STATUS, DEV_SERVICE_LIST)
+                         LOG_ANALYTICS_RP, CONTAINER_APPS_RP, CHECK_CERTIFICATE_NAME_AVAILABILITY_TYPE,
+                         ACR_IMAGE_SUFFIX,
+                         LOGS_STRING, PENDING_STATUS, SUCCEEDED_STATUS, UPDATING_STATUS, DEV_SERVICE_LIST,
+                         KNOWN_ACR_SUFFIXES)
 from ._models import (ContainerAppCustomDomainEnvelope as ContainerAppCustomDomainEnvelopeModel,
                       ManagedCertificateEnvelop as ManagedCertificateEnvelopModel)
 from ._models import OryxMarinerRunImgTagProperty
@@ -1169,7 +1170,7 @@ def _get_app_from_revision(revision):
 
 def _infer_acr_credentials(cmd, registry_server, disable_warnings=False):
     # If registry is Azure Container Registry, we can try inferring credentials
-    if ACR_IMAGE_SUFFIX not in registry_server:
+    if not is_acr_registry(registry_server):
         raise RequiredArgumentMissingError('Registry username and password are required if not using Azure Container Registry.')
     not disable_warnings and logger.warning('No credential was provided to access Azure Container Registry. Trying to look up credentials...')
     parsed = urlparse(registry_server)
@@ -1998,3 +1999,56 @@ def parse_oryx_mariner_tag(tag: str) -> OryxMarinerRunImgTagProperty:
     else:
         tag_obj = None
     return tag_obj
+
+
+def is_acr_registry(registry_server):
+    """
+    Checks if the given registry server is Azure Container Registry
+    """
+
+    try:
+        acr_suffix = get_acr_suffix()
+
+        if acr_suffix and acr_suffix in registry_server:
+            return True
+
+        # As a fallback, also check for known ACR suffixes
+        return any(suffix in registry_server for suffix in KNOWN_ACR_SUFFIXES)
+
+    except Exception:
+        # If getting cloud information fails, fall back to checking known suffixes
+        return any(suffix in registry_server for suffix in KNOWN_ACR_SUFFIXES)
+
+
+def get_acr_suffix():
+    """
+    Get the ACR login server suffix of the current cloud environment
+    """
+
+    try:
+        active_cloud = get_active_cloud()
+        acr_suffix = getattr(active_cloud.suffixes, 'acr_login_server_endpoint', None)
+        return acr_suffix
+    except Exception:
+        return ACR_IMAGE_SUFFIX
+
+
+def _get_all_acr_suffixes():
+    suffixes = set(KNOWN_ACR_SUFFIXES)
+
+    current_suffix = get_acr_suffix()
+    if current_suffix:
+        suffixes.add(current_suffix)
+
+    return list(suffixes)
+
+
+def get_acr_registry_name(registry_server):
+    if not registry_server:
+        return None
+
+    all_suffixes = _get_all_acr_suffixes()
+
+    for suffix in all_suffixes:
+        if suffix in registry_server:
+            return registry_server[:registry_server.rindex(suffix)]
